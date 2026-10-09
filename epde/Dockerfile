@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir --upgrade pip \
         torch==2.4.0 \
     && pip install --no-cache-dir \
         auto_mix_prep==0.2.0 \
+        "dill>=0.3" \
         matplotlib==3.10.1 \
         numpy==1.26.4 \
         pandas==1.5.3 \

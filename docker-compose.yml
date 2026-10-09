@@ -26,9 +26,11 @@ services:
       context: .
       dockerfile: epde/Dockerfile
     environment:
-      - PYTHONPATH=/app:/app/epde/EPDE
+      - PYTHONPATH=/app:/opt/epde
+      - EPDE_PATH=/opt/epde
     volumes:
       - ./data:/app/data:ro
+      - ${EPDE_PATH:-./epde/EPDE}:/opt/epde:ro
       - ./results:/app/results
     command: ["python", "clean_run_metrics.py", "epde"]
 

@@ -287,3 +287,46 @@ the discovered equation has the correct structure.
 ## Current Results
 
 The current clean and noisy summaries are collected in [`results.md`](results.md).
+
+
+### Modern EPDE checkout
+
+The shared clean/noise/boundary drivers use `epde/run_config_api.py`.
+Select a modern EPDE checkout containing `projects/pic/epde_bench` explicitly:
+
+```sh
+export EPDE_PATH=/absolute/path/to/EPDE
+python clean_run_metrics.py epde --protocol native --datasets ode_data.npy lotka_data.npy ac_data.npy --algorithm-seed 0
+python clean_run_metrics.py epde --protocol fixed --datasets ode_data.npy lotka_data.npy ac_data.npy --epde-path "$EPDE_PATH" --algorithm-seed 0
+```
+
+A clean run writes a JSON sidecar beside its common CSV, retaining raw equations,
+coefficients, grouped configuration, seed, derivative source, EPDE checkout and
+Git revision. The revision identifies the committed base; local checkout changes
+must also be preserved with the experiment. The legacy submodule is not upgraded
+or initialized by the driver. Invalid or conflicting checkout paths fail explicitly.
+The EPDE Docker service mounts the host `EPDE_PATH` at `/opt/epde`; set this
+variable before `docker compose` or `run_benchmark.py`. Docker has not been
+validated as part of the local smoke checks.
+
+The fixed protocol retains PDEComp's shared numerical pure derivatives in EPDE's
+axis-major layout, dataset windows, configured stored features and search budgets.
+The native protocol retains EPDE preprocessing and symbolic families without a
+shared fixed candidate matrix. Trigonometric frequencies are explicit metadata:
+`ode_data.npy` uses exactly 2 in both protocols; native scalar tasks otherwise
+use exactly 1; fixed tasks use exactly 2 except `ODE_simple_discovery` (1).
+No interval-width heuristic determines whether a family is fixed. Systems retain
+their configured variables and have no native trigonometric family. The driver
+seeds Python, NumPy and PyTorch independently of the noise realization seed.
+
+EPDE structural/coefficient metrics use the modern `epde_bench.metrics` and
+registered accepted truth systems. Registry data files must therefore be present
+in the selected checkout even though search data still come from PDEComp's own
+`data/` and retain its original windows (including LV's first 150 samples).
+The `pde_divide_data.npy` truth explicitly retains PDEComp's -1 and 0.25
+coefficients rather than the modern record's -2 and 0.5. Existing accepted
+similarity/soliton forms remain accepted; they should not be interpreted as
+recovery of a general governing law. Clean smoke completion means the command,
+raw result and common metrics agree; it does not promise structural recovery.
+The full external dataset campaign and nonzero-noise experiments remain separate
+from the checked local smoke scenarios.

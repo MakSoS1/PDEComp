@@ -3,6 +3,7 @@ import contextlib
 import csv
 import importlib.util
 import io
+import json
 import re
 import sys
 import time
@@ -21,28 +22,19 @@ from utils.protocols import (
     benchmark_exit_code,
 )
 from utils.randomness import seed_everything
+from utils.epde_runtime import configure_epde
 
 
 ROOT = Path(__file__).resolve().parent
 COEFFICIENT_TOLERANCE = 1e-12
 DEFAULT_DATASETS = list(TRUE_COEFFICIENTS)
-THESIS_DIR = ROOT / "epde" / "EPDE" / "projects" / "thesis"
-THESIS_CONFIG_DIR = THESIS_DIR / "configs"
-EPDE_THESIS_CONFIGS = {
-    "ode_data.npy": "ode",
-    "vdp_data.npy": "vdp",
-    "lotka_data.npy": "lv",
-    "lorenz_data.npy": "lorenz",
-    "burgers_data.mat": "burgers_viscous",
-    "burgers_sln_100_data.csv": "burgers_inviscid",
-    "ac_data.npy": "ac",
-    "kdv_data.mat": "kdv",
-    "kdv_periodic_data.npy": "kdv_cossin",
-    "wave_data.csv": "wave",
-    "pde_divide_data.npy": "pde_divide",
-    "pde_compound_data.npy": "pde_compound",
-    "ks_data.mat": "ks",
-    "ns_data.mat": "ns",
+EPDE_DATASET_REGISTRY = {
+    "ode_data.npy": "ode", "vdp_data.npy": "vdp", "lotka_data.npy": "lv",
+    "lorenz_data.npy": "lorenz", "burgers_data.mat": "burgers",
+    "burgers_sln_100_data.csv": "burgers_inviscid", "ac_data.npy": "ac",
+    "kdv_data.mat": "kdv", "kdv_periodic_data.npy": "kdv_cossin",
+    "wave_data.csv": "wave", "pde_divide_data.npy": "pde_divide",
+    "pde_compound_data.npy": "pde_compound", "ks_data.mat": "ks", "ns_data.mat": "ns",
 }
 _THESIS_METRICS = None
 _EPDE_TRUTH_CACHE = {}
@@ -58,17 +50,14 @@ def load_module(module_name, path, extra_paths=()):
     return module
 
 
-def load_framework_module(framework):
+def load_framework_module(framework, epde_path=None):
     if framework == "pysindy":
         return load_module("pysindy_run", ROOT / "pysindy" / "run.py")
     if framework == "deepmod":
         return load_module("deepmod_run", ROOT / "deepmod" / "run.py")
     if framework == "epde":
-        return load_module(
-            "epde_run",
-            ROOT / "epde" / "run.py",
-            extra_paths=(ROOT / "epde" / "EPDE",),
-        )
+        configure_epde(epde_path)
+        return load_module("epde_run", ROOT / "epde" / "run_config_api.py")
     if framework == "discover":
         return load_module(
             "discover_run",
@@ -91,39 +80,29 @@ def load_framework_module(framework):
 
 
 def load_thesis_metrics():
+    """Compatibility name for callers; metrics now come from epde_bench."""
     global _THESIS_METRICS
     if _THESIS_METRICS is None:
-        _THESIS_METRICS = load_module(
-            "epde_thesis_metrics",
-            THESIS_DIR / "thesis_metrics.py",
-            extra_paths=(THESIS_DIR,),
-        )
+        configure_epde()
+        from epde_bench import metrics
+        _THESIS_METRICS = metrics
     return _THESIS_METRICS
-
-
-def read_yaml(path):
-    import yaml
-
-    with open(path, encoding="utf-8") as handle:
-        return yaml.safe_load(handle) or {}
 
 
 def epde_truth_text_alternatives(dataset):
     if dataset in _EPDE_TRUTH_CACHE:
         return _EPDE_TRUTH_CACHE[dataset]
-
-    config_name = EPDE_THESIS_CONFIGS.get(dataset)
-    if config_name is None:
-        _EPDE_TRUTH_CACHE[dataset] = []
+    name = EPDE_DATASET_REGISTRY.get(dataset)
+    if name is None:
         return []
-
-    config_path = THESIS_CONFIG_DIR / f"{config_name}.yaml"
-    config = read_yaml(config_path)
-    alternatives = []
-    primary = config.get("truth_equations") or []
-    if primary:
-        alternatives.append(primary)
-    alternatives.extend(config.get("truth_alternatives") or [])
+    configure_epde()
+    from epde_bench import datasets
+    problem = datasets.load(name)
+    alternatives = problem.truth_systems
+    # PDEComp's record uses half the coefficients of the current EPDE record.
+    # Keep its original law and window; never silently change the benchmark.
+    if dataset == "pde_divide_data.npy":
+        alternatives = [["-1.0 * du/dx1{power: 1.0} + 0.25 * d^2u/dx1^2{power: 1.0} * x{power: 1.0, dim: 1.0} = du/dx0{power: 1.0} * x{power: 1.0, dim: 1.0}"]]
     _EPDE_TRUTH_CACHE[dataset] = alternatives
     return alternatives
 
@@ -612,6 +591,8 @@ def summarize_dataset(framework, module, dataset, args, quiet=True):
     else:
         result = run_framework(framework, module, dataset, args, quiet=False)
     runtime_seconds = time.perf_counter() - start
+    if hasattr(args, "raw_results"):
+        args.raw_results.append({"framework": framework, "dataset": dataset, "result": result})
 
     if framework == "epde":
         if getattr(args, "epde_pareto_oracle", False):
@@ -711,6 +692,7 @@ def parse_args():
     parser.add_argument("--output", default=None)
     parser.add_argument("--show-equations", action="store_true")
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--epde-path", help="Modern EPDE checkout (or set EPDE_PATH).")
     parser.add_argument("--solution-index", type=int, default=0)
     parser.add_argument(
         "--epde-pareto-oracle",
@@ -739,10 +721,11 @@ def main():
     args = parse_args()
     output_file = Path(args.output) if args.output else default_output(args.framework, args.protocol)
     all_rows = []
+    args.raw_results = []
 
     for framework in selected_frameworks(args.framework):
         try:
-            module = load_framework_module(framework)
+            module = load_framework_module(framework, epde_path=args.epde_path)
         except Exception as error:
             datasets = args.datasets or DEFAULT_DATASETS
             all_rows.extend(error_row(framework, dataset, error, args.protocol) for dataset in datasets)
@@ -778,6 +761,10 @@ def main():
                 print(f"  error: {error}")
 
     write_rows(all_rows, output_file)
+    json_file = output_file.with_suffix(".json")
+    with json_file.open("w", encoding="utf-8") as handle:
+        json.dump({"protocol": args.protocol, "algorithm_seed": args.algorithm_seed,
+                   "runs": args.raw_results, "metrics": all_rows}, handle, indent=2)
     print(f"\nSaved clean-run metrics to {output_file}")
     return benchmark_exit_code(all_rows, allow_empty=args.allow_empty)
 
