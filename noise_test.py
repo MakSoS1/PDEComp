@@ -129,7 +129,7 @@ def run_framework_on_data(framework, module, data, x, y, z, t, dataset, args=Non
 
 
 def run_dataset_at_noise(dataset, noise_level, seed, framework="pysindy", module=None, args=None):
-    module = module or load_framework_module(framework)
+    module = module or load_framework_module(framework, epde_path=getattr(args, "epde_path", None))
     data, x, y, z, t = load_data(dataset)
     noise_rng = np.random.RandomState(seed)
     noised_data = add_dataset_noise(data, noise_level, rng=noise_rng)
@@ -447,6 +447,7 @@ def parse_args():
     parser.add_argument("--success-max", type=int, default=DEFAULT_SUCCESS_MAX)
     parser.add_argument("--output", default=None)
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--epde-path", help="Modern EPDE checkout (or set EPDE_PATH).")
     parser.add_argument("--solution-index", type=int, default=0)
     parser.add_argument(
         "--epde-pareto-oracle",
@@ -472,7 +473,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    module = load_framework_module(args.framework)
+    module = load_framework_module(args.framework, epde_path=args.epde_path)
     datasets = args.datasets or getattr(module, "DATASETS", DEFAULT_DATASETS)
     levels = args.levels if args.levels is not None else default_levels(args.framework)
     output_file = Path(args.output) if args.output else default_output(args.framework, args.protocol)

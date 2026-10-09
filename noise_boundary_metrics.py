@@ -287,6 +287,7 @@ def parse_args():
     parser.add_argument("--boundaries-csv", default="")
     parser.add_argument("--output", default="")
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--epde-path", help="Modern EPDE checkout (or set EPDE_PATH).")
     parser.add_argument("--solution-index", type=int, default=0)
     parser.add_argument(
         "--epde-pareto-oracle",
@@ -307,7 +308,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    module = load_framework_module(args.framework)
+    module = load_framework_module(args.framework, epde_path=args.epde_path)
     if args.protocol == NATIVE_PROTOCOL and not args.boundaries_csv:
         raise ValueError("Native boundary metrics require --boundaries-csv from a native noise sweep")
     boundaries_csv = Path(args.boundaries_csv) if args.boundaries_csv else default_boundaries_csv(args.framework)
